@@ -76,16 +76,18 @@ prefer additive, nullable/defaulted columns.
 
 Calnode ships 9 locales (`en es fr fr-CA de it pt nl sv`) across the booker-facing surfaces:
 booking page, manage/reschedule page, embed widget, the four emails, and the calendar
-invite. The admin UI and the built-in video room are English-only.
+invite. The admin SPA is translated separately (`en` + `fr` today). The built-in video
+room is still English-only.
 
 **Translation PRs are very welcome** - both new languages and corrections to existing
-ones. **Every non-English locale is currently a machine draft with no native review**, so
-if you speak one of them, fixes are genuinely valuable and will be merged readily. Small,
-single-language PRs are easier to review than sweeping ones.
+ones. **Every non-English *booker* locale is currently a machine draft with no native
+review**, so if you speak one of them, fixes are genuinely valuable and will be merged
+readily. Small, single-language PRs are easier to review than sweeping ones. The admin
+French catalog was written by a native speaker.
 
-**Adding a language is adding one file:** `internal/i18n/locales/<code>.json`. No Go,
-template, or frontend change is needed - `init()` globs the directory, and the language
-switcher, the fallback-language setting and the public API payload all read
+**Adding a booker-facing language is adding one file:** `internal/i18n/locales/<code>.json`.
+No Go, template, or frontend change is needed - `init()` globs the directory, and the
+language switcher, the fallback-language setting and the public API payload all read
 `SupportedLocales()`.
 
 1. Copy `internal/i18n/locales/en.json` and translate the values. Keep every key, keep
@@ -100,6 +102,18 @@ switcher, the fallback-language setting and the public API payload all read
 5. Eyeball the result: `go run ./cmd/calnode`, then
    `http://localhost:3000/book/<slug>?lang=<code>` and the manage page. Long words
    overflowing buttons is the usual surprise; check mobile width too.
+
+**Adding an admin-UI language** is a small frontend change (the catalogs are not globbed):
+
+1. Copy `frontend/src/lib/i18n/en.json` to `<code>.json` and translate the values. Keep
+   every key and any `{placeholders}`. English is the source of truth; missing keys fall
+   back to English at runtime.
+2. Register the new file in `frontend/src/lib/i18n/catalog.ts` (`catalogs` + `ADMIN_LOCALES`).
+3. Name the code the same way as booker locales: BCP-47 primary tag (`fr`, `de`).
+4. The operator picks the language in Settings → Profile → Preferences (stored in
+   `localStorage`, with `navigator.languages` as the first-visit fallback).
+5. Run the catalog tests (`node --experimental-strip-types --test src/lib/i18n/catalog.test.ts`
+   from `frontend/`). `pnpm test:visual` also runs the same assertions via Vitest.
 
 Background and the full list of limitations (2-form plurals, no RTL) are in
 [ARCHITECTURE.md §23](docs/ARCHITECTURE.md).
