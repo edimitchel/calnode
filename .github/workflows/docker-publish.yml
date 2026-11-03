@@ -19,6 +19,16 @@ on:
     branches: [main, dev]
     tags: ['v*.*.*']
   pull_request:
+  # A rehearsal: build everything and run the release job's packaging and download
+  # steps, then stop before publishing a GitHub Release. It exists so the release
+  # path can be executed without cutting a tag, which is otherwise the only way to
+  # find out whether it still works.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Exercise the release job without creating a GitHub Release'
+        type: boolean
+        default: true
 
 concurrency:
   group: docker-publish-${{ github.ref }}
@@ -55,7 +65,7 @@ jobs:
       - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -87,7 +97,7 @@ jobs:
         with:
           context: .
           platforms: ${{ env.BUILD_PLATFORMS }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -155,7 +165,7 @@ jobs:
           test "$(uname -m)" = "aarch64"
 
       - name: Pull the image this build just published
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         env:
           IMAGE_REF: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
         run: |
@@ -166,18 +176,20 @@ jobs:
           fi
           docker pull "$IMAGE_REF"
 
-      - name: Build for arm64 natively (pull requests only)
-        if: github.event_name == 'pull_request'
+      - name: Build for arm64 natively (anything that did not publish an image)
+        if: github.event_name != 'push'
         run: docker build --platform linux/arm64 -t calnode-pr:arm64 .
 
       - name: Resolve the image under test
         id: img
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=calnode-pr:arm64" >> "$GITHUB_OUTPUT"
-          else
+          # A push published an image, so verify that exact digest. Anything else
+          # (pull request, dry-run dispatch) built locally and is verified as-is.
+          if [ "${{ github.event_name }}" = "push" ]; then
             echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=calnode-pr:arm64" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Confirm the image is arm64
@@ -266,8 +278,8 @@ jobs:
         run: docker logs calnode 2>&1 | tail -30
 
   release:
-    # Only on a version tag, and only once the image built + pushed.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # On a version tag, and on a dry-run dispatch, where it stops before publishing.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.dry_run)
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -303,6 +315,7 @@ jobs:
       # Preinstalled gh CLI + GITHUB_TOKEN (no third-party action — keeps the
       # supply-chain surface small).
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
